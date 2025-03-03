@@ -1167,6 +1167,41 @@ impl DisplaySnapshot {
         DisplayRow(longest_row.0)
     }
 
+    pub fn is_empty_block(&self, buffer_row: MultiBufferRow) -> bool {
+        let max_row = self.buffer_snapshot.max_row();
+        if buffer_row >= max_row {
+            return false;
+        }
+
+        let start = MultiBufferPoint::new(buffer_row.0, 0);
+        let end = MultiBufferPoint::new(buffer_row.0, self.buffer_snapshot.line_len(buffer_row));
+        let current_line_text: String = self.buffer_snapshot
+            .text_for_range(start..end)
+            .collect();
+
+        if !current_line_text.trim().ends_with('{') {
+            return false;
+        }
+
+        let mut row = buffer_row.0 + 1;
+        while row <= max_row.0 {
+            let line_start = MultiBufferPoint::new(row, 0);
+            let line_end = MultiBufferPoint::new(row, self.buffer_snapshot.line_len(MultiBufferRow(row)));
+            let line_text: String = self.buffer_snapshot
+                .text_for_range(line_start..line_end)
+                .collect();
+            
+            if line_text.trim().is_empty() {
+                row += 1;
+                continue;
+            }
+            
+            return line_text.trim() == "}";
+        }
+
+        false
+    }
+    
     pub fn starts_indent(&self, buffer_row: MultiBufferRow) -> bool {
         let max_row = self.buffer_snapshot.max_row();
         if buffer_row >= max_row {

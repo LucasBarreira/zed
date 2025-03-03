@@ -17330,59 +17330,49 @@ impl EditorSnapshot {
         })
     }
 
-    pub fn render_crease_toggle(
+    fn render_crease_toggle(
         &self,
-        buffer_row: MultiBufferRow,
+        buffer_row: MultiBufferRow, 
         row_contains_cursor: bool,
         editor: Entity<Editor>,
-        window: &mut Window,
+        window: &mut Window, 
         cx: &mut App,
     ) -> Option<AnyElement> {
         let folded = self.is_line_folded(buffer_row);
         let mut is_foldable = false;
-
-        if let Some(crease) = self
-            .crease_snapshot
-            .query_row(buffer_row, &self.buffer_snapshot)
-        {
+    
+        if self.is_empty_block(buffer_row) {
+            return None;
+        }
+    
+        if let Some(crease) = self.crease_snapshot.query_row(buffer_row, &self.buffer_snapshot) {
             is_foldable = true;
             match crease {
                 Crease::Inline { render_toggle, .. } | Crease::Block { render_toggle, .. } => {
                     if let Some(render_toggle) = render_toggle {
-                        let toggle_callback =
-                            Arc::new(move |folded, window: &mut Window, cx: &mut App| {
-                                if folded {
-                                    editor.update(cx, |editor, cx| {
-                                        editor.fold_at(&crate::FoldAt { buffer_row }, window, cx)
-                                    });
-                                } else {
-                                    editor.update(cx, |editor, cx| {
-                                        editor.unfold_at(
-                                            &crate::UnfoldAt { buffer_row },
-                                            window,
-                                            cx,
-                                        )
-                                    });
-                                }
-                            });
-                        return Some((render_toggle)(
-                            buffer_row,
-                            folded,
-                            toggle_callback,
-                            window,
-                            cx,
-                        ));
+                        let toggle_callback = Arc::new(move |folded, window: &mut Window, cx: &mut App| {
+                            if folded {
+                                editor.update(cx, |editor, cx| {
+                                    editor.fold_at(&crate::FoldAt { buffer_row }, window, cx)
+                                });
+                            } else {
+                                editor.update(cx, |editor, cx| {
+                                    editor.unfold_at(&crate::UnfoldAt { buffer_row }, window, cx)
+                                });
+                            }
+                        });
+                        return Some((render_toggle)(buffer_row, folded, toggle_callback, window, cx));
                     }
                 }
             }
         }
-
+    
         is_foldable |= self.starts_indent(buffer_row);
-
+    
         if folded || (is_foldable && (row_contains_cursor || self.gutter_hovered)) {
             Some(
                 Disclosure::new(("gutter_crease", buffer_row.0), !folded)
-                    .toggle_state(folded)
+                    .toggle_state(folded) 
                     .on_click(window.listener_for(&editor, move |this, _e, window, cx| {
                         if folded {
                             this.unfold_at(&UnfoldAt { buffer_row }, window, cx);
@@ -17390,7 +17380,7 @@ impl EditorSnapshot {
                             this.fold_at(&FoldAt { buffer_row }, window, cx);
                         }
                     }))
-                    .into_any_element(),
+                    .into_any_element()
             )
         } else {
             None
