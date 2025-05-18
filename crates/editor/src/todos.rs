@@ -1,9 +1,13 @@
 use crate::Editor;
 use anyhow::Result;
-use gpui::{actions, AppContext, DismissEvent, div, prelude::*, WindowContext};
-use project::{Project, TodoEntry};
-use ui::{prelude::*, ListState, ListView, Icon, IconButton, IconName};
+use gpui::{
+    actions, div, h_flex, list, px, v_flex, AppContext, DismissEvent, div, prelude::*, 
+    ListState, ListView, WindowContext,
+};
+use project::{Project, TodoEntry, TodoKind}; 
+use ui::{prelude::*, ListHeader, ListItem};
 use workspace::{Panel, Workspace, panel};
+use regex::Regex;
 
 actions!(todos, [ShowTodos, ToggleFocus]);
 
@@ -56,52 +60,90 @@ impl TodosPanel {
         self.todos = todos;
         self.list_state.scroll_to_top(cx);
     }
+
+    fn todo_count(&self) -> (usize, usize) {
+        let mut todos = 0;
+        let mut fixmes = 0;
+        for todo in &self.todos {
+            match todo.kind {
+                TodoKind::Todo => todos += 1,
+                TodoKind::Fixme => fixmes += 1,
+            }
+        }
+        (todos, fixmes)
+    }
 }
 
 impl Panel for TodosPanel {
     fn persistent_name() -> &'static str {
-        "TODOs" 
-    }
-
-    fn position(&self) -> panel::Position {
-        panel::Position::Right
+        "TODOs"
     }
 
     fn icon(&self) -> Option<IconName> {
         Some(IconName::Check)
     }
 
+    fn icon_tooltip(&self, _: &Window, _: &App) -> Option<&'static str> {
+        Some("TODOs and FIXMEs")
+    }
+
     fn toggle_action() -> Box<dyn gpui::Action> {
         ToggleFocus.boxed_clone()
     }
 
+    fn position(&self) -> panel::Position {
+        panel::Position::Right
+    }
+
     fn render(&mut self, cx: &mut WindowContext) -> impl IntoElement {
-        div()
+        let (todo_count, fixme_count) = self.todo_count();
+        
+        v_flex()
             .size_full()
-            .flex()
-            .flex_col()
+            .gap_2()
+            .p_2()
             .child(
-                div()
+                h_flex()
                     .w_full()
-                    .px_2()
-                    .py_1()
-                    .border_b()
-                    .border_color(cx.theme().colors().border)
-                    .child(h_flex().gap_1().child("TODOs").child(format!("({})", self.todos.len())))
+                    .justify_between()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child("TODOs")
+                            .text_color(cx.theme().colors().text)
+                            .child(
+                                div()
+                                    .text_color(cx.theme().colors().text_muted)
+                                    .child(format!("{todo_count}"))
+                            )
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child("FIXMEs")
+                            .text_color(cx.theme().colors().text)
+                            .child(
+                                div()
+                                    .text_color(cx.theme().colors().text_muted)
+                                    .child(format!("{fixme_count}"))
+                            )
+                    )
             )
             .child(
                 ListView::new()
                     .size_full()
-                    .flex_grow()
-                    .tracks(["list"])
+                    .track_scroll()
+                    .track_visible_items()
                     .on_click(move |event, cx| {
                         if let Some(todo) = self.todos.get(event.item.index) {
                             cx.window_context().update(|cx| {
                                 if let Some(workspace) = workspace::Workspace::find_focused(cx) {
                                     workspace.update(cx, |workspace, window, cx| {
                                         workspace.open_path(
-                                            todo.path.clone(),
-                                            Some(todo.range.start),
+                                            todo.file_path.clone(),
+                                            Some(language::Anchor::position(
+                                                language::Point::new(todo.line - 1, todo.start_column),
+                                            )),
                                             true,
                                             window,
                                             cx,
@@ -117,26 +159,112 @@ impl Panel for TodosPanel {
                         move |_index| "list".to_string(),
                         move |ix, _item_id, cx| {
                             let todo = &self.todos[ix];
-                            div()
-                                .w_full()
-                                .px_2()
-                                .py_1()
-                                .hover(|style| style.bg(cx.theme().colors().highlight_primary))
-                                .cursor_pointer()
+                            let icon = match todo.kind {
+                                TodoKind::Todo => IconName::Check,
+                                TodoKind::Fixme => IconName::Alert,
+                            };
+                            
+                            ListItem::new(ix)
+                                .inset_0()
+                                .spacing_2()
                                 .child(
-                                    v_flex()
-                                        .gap_0p5()
-                                        .child(todo.content.to_string())
+                                    h_flex()
+                                        .gap_2()
+                                        .child(Icon::new(icon))
                                         .child(
-                                            div()
-                                                .text_color(cx.theme().colors().text_muted)
-                                                .text_xs()
-                                                .child(format!("{}:{}", todo.path.path.display(), todo.range.start.row + 1))
+                                            v_flex()
+                                                .gap_0p5()
+                                                .child(todo.message.clone())
+                                                .child(
+                                                    div()
+                                                        .text_color(cx.theme().colors().text_muted)
+                                                        .text_xs()
+                                                        .child(format!(
+                                                            "{}:{}",
+                                                            todo.file_path.path.display(),
+                                                            todo.line
+                                                        ))
+                                                )
                                         )
                                 )
                                 .into_any_element()
                         },
-                    ),
+                    )
             )
     }
+}
+
+pub struct TodoScanner {
+    todo_pattern: Regex,
+    block_todo_pattern: Regex,
+}
+
+impl TodoScanner {
+    pub fn new() -> Self {
+        Self {
+            todo_pattern: Regex::new(r"(?i)//\s*(?:TODO|FIXME)(?::|=|\s)\s*(.+)").unwrap(),
+            block_todo_pattern: Regex::new(r"(?i)/\*+\s*(?:TODO|FIXME)(?::|=|\s)\s*([^*]+)\*/").unwrap(),
+        }
+    }
+
+    pub fn scan_todos(&self, text: &str) -> Vec<TodoLocation> {
+        let mut todos = Vec::new();
+        
+        for (line_num, line) in text.lines().enumerate() {
+            // Check for single line todos
+            if let Some(cap) = self.todo_pattern.captures(line) {
+                if let Some(message) = cap.get(1) {
+                    let kind = if line.to_lowercase().contains("fixme") {
+                        TodoKind::Fixme
+                    } else {
+                        TodoKind::Todo 
+                    };
+                    
+                    todos.push(TodoLocation {
+                        line: line_num + 1,
+                        kind,
+                        message: message.as_str().trim().to_string(),
+                        start: message.start(),
+                        end: message.end()
+                    });
+                }
+            }
+
+            // Check for block todos
+            if let Some(cap) = self.block_todo_pattern.captures(line) {
+                if let Some(message) = cap.get(1) {
+                    let kind = if line.to_lowercase().contains("fixme") {
+                        TodoKind::Fixme
+                    } else {
+                        TodoKind::Todo
+                    };
+
+                    todos.push(TodoLocation {
+                        line: line_num + 1, 
+                        kind,
+                        message: message.as_str().trim().to_string(),
+                        start: message.start(),
+                        end: message.end()
+                    });
+                }
+            }
+        }
+
+        todos
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TodoLocation {
+    pub line: usize,
+    pub kind: TodoKind,
+    pub message: String,
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TodoKind {
+    Todo,
+    Fixme
 }

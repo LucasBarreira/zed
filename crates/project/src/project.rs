@@ -140,6 +140,8 @@ const MAX_PROJECT_SEARCH_HISTORY_SIZE: usize = 500;
 const MAX_SEARCH_RESULT_FILES: usize = 5_000;
 const MAX_SEARCH_RESULT_RANGES: usize = 10_000;
 
+//use editor::todos::{TodoScanner, TodoLocation};
+
 pub trait ProjectItem: 'static {
     fn try_open(
         project: &Entity<Project>,
@@ -4506,8 +4508,8 @@ impl Project {
         {
             let mut remotely_create_models = self.remotely_created_models.lock();
             if remotely_create_models.retain_count == 0 {
-                remotely_created_models.buffers = self.buffer_store.read(cx).buffers().collect();
-                remotely_created_models.worktrees =
+                remotely_create_models.buffers = self.buffer_store.read(cx).buffers().collect();
+                remotely_create_models.worktrees =
                     self.worktree_store.read(cx).worktrees().collect();
             }
             remotely_create_models.retain_count += 1;
@@ -4964,24 +4966,24 @@ impl Project {
         self.agent_location.clone()
     }
 
-    pub fn search_todos(&self, cx: &mut AppContext) -> Result<Vec<TodoEntry>> {
+    pub fn search_todos(&self, cx: &mut Context<Self>) -> Result<Vec<TodoEntry>> {
         let mut todos = Vec::new();
         
         // Common TODO patterns
         let todo_pattern = regex::Regex::new(r"(?i)//\s*(?:TODO|FIXME)(?::|=|\s)\s*(.+)").unwrap();
         let block_todo_pattern = regex::Regex::new(r"(?i)/\*+\s*(?:TODO|FIXME)(?::|=|\s)\s*([^*]+)\*/").unwrap();
 
-        for worktree in self.worktrees().values() {
-            let entries = worktree.read(cx).entries()?;
+        for worktree in self.worktree_store.read(cx).worktrees() {
+            let worktree = worktree.read(cx);
             
-            for (path, entry) in entries {
-                if let Some(file) = entry.as_file() {
+            for entry in worktree.entries(true, 0) {
+                if entry.kind == EntryKind::File {
                     // Skip binary and large files
-                    if file.is_binary() || file.size > 1_000_000 {
-                        continue;
-                    }
+                    // if entry.is_binary() || entry.size() > 1_000_000 {
+                    //     continue; 
+                    // }
 
-                    if let Ok(content) = std::fs::read_to_string(file.path()) {
+                    if let Ok(content) = std::fs::read_to_string(&entry.path) {
                         // Process line comments
                         for (i, line) in content.lines().enumerate() {
                             if let Some(cap) = todo_pattern.captures(line) {
@@ -4995,7 +4997,10 @@ impl Project {
                                 };
 
                                 todos.push(TodoEntry {
-                                    file_path: path.clone(),
+                                    file_path: ProjectPath {
+                                        worktree_id: worktree.id(),
+                                        path: entry.path.clone(),
+                                    },
                                     line: i + 1,
                                     text: line.to_string(),
                                     kind,
@@ -5020,7 +5025,10 @@ impl Project {
                                 };
 
                                 todos.push(TodoEntry {
-                                    file_path: path.clone(),
+                                    file_path: ProjectPath {
+                                        worktree_id: worktree.id(),
+                                        path: entry.path.clone(),
+                                    },
                                     line: line + 1,
                                     text: matched.as_str().to_string(),
                                     kind,
