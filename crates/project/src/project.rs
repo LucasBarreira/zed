@@ -3648,7 +3648,7 @@ impl Project {
             self.find_search_candidate_buffers(&query, MAX_SEARCH_RESULT_FILES + 1, cx)
         };
 
-        cx.spawn(async move |_, cx| {
+        cx.spawn(async move |_project, cx| {
             let mut range_count = 0;
             let mut buffer_count = 0;
             let mut limit_reached = false;
@@ -4506,8 +4506,8 @@ impl Project {
         {
             let mut remotely_create_models = self.remotely_created_models.lock();
             if remotely_create_models.retain_count == 0 {
-                remotely_create_models.buffers = self.buffer_store.read(cx).buffers().collect();
-                remotely_create_models.worktrees =
+                remotely_created_models.buffers = self.buffer_store.read(cx).buffers().collect();
+                remotely_created_models.worktrees =
                     self.worktree_store.read(cx).worktrees().collect();
             }
             remotely_create_models.retain_count += 1;
@@ -4963,6 +4963,97 @@ impl Project {
     pub fn agent_location(&self) -> Option<AgentLocation> {
         self.agent_location.clone()
     }
+
+    pub fn search_todos(&self, cx: &mut AppContext) -> Result<Vec<TodoEntry>> {
+        let mut todos = Vec::new();
+        
+        // Common TODO patterns
+        let todo_pattern = regex::Regex::new(r"(?i)//\s*(?:TODO|FIXME)(?::|=|\s)\s*(.+)").unwrap();
+        let block_todo_pattern = regex::Regex::new(r"(?i)/\*+\s*(?:TODO|FIXME)(?::|=|\s)\s*([^*]+)\*/").unwrap();
+
+        for worktree in self.worktrees().values() {
+            let entries = worktree.read(cx).entries()?;
+            
+            for (path, entry) in entries {
+                if let Some(file) = entry.as_file() {
+                    // Skip binary and large files
+                    if file.is_binary() || file.size > 1_000_000 {
+                        continue;
+                    }
+
+                    if let Ok(content) = std::fs::read_to_string(file.path()) {
+                        // Process line comments
+                        for (i, line) in content.lines().enumerate() {
+                            if let Some(cap) = todo_pattern.captures(line) {
+                                let message = cap[1].trim().to_string();
+                                let matched = cap.get(0).unwrap();
+                                
+                                let kind = if line.to_uppercase().contains("FIXME") {
+                                    TodoKind::Fixme
+                                } else {
+                                    TodoKind::Todo
+                                };
+
+                                todos.push(TodoEntry {
+                                    file_path: path.clone(),
+                                    line: i + 1,
+                                    text: line.to_string(),
+                                    kind,
+                                    message,
+                                    start_column: matched.start(),
+                                    end_column: matched.end(),
+                                });
+                            }
+                        }
+
+                        // Process block comments
+                        for cap in block_todo_pattern.captures_iter(&content) {
+                            if let Some(matched) = cap.get(0) {
+                                let message = cap[1].trim().to_string();
+                                let before = &content[..matched.start()];
+                                let line = before.chars().filter(|&c| c == '\n').count();
+                                
+                                let kind = if matched.as_str().to_uppercase().contains("FIXME") {
+                                    TodoKind::Fixme
+                                } else {
+                                    TodoKind::Todo
+                                };
+
+                                todos.push(TodoEntry {
+                                    file_path: path.clone(),
+                                    line: line + 1,
+                                    text: matched.as_str().to_string(),
+                                    kind,
+                                    message,
+                                    start_column: matched.start() - before.rfind('\n').unwrap_or(0),
+                                    end_column: matched.end() - before.rfind('\n').unwrap_or(0),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(todos)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TodoEntry {
+    pub file_path: ProjectPath,
+    pub line: usize,
+    pub text: String,
+    pub kind: TodoKind,
+    pub message: String, // Add message field
+    pub start_column: usize, // Add position info
+    pub end_column: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TodoKind {
+    Todo,
+    Fixme,
 }
 
 pub struct PathMatchCandidateSet {
@@ -5171,7 +5262,10 @@ impl ProjectItem for Buffer {
         project: &Entity<Project>,
         path: &ProjectPath,
         cx: &mut App,
-    ) -> Option<Task<Result<Entity<Self>>>> {
+    ) -> Option<Task<Result<Entity<Self>>>>
+    where
+        Self: Sized,
+    {
         Some(project.update(cx, |project, cx| project.open_buffer(path.clone(), cx)))
     }
 
