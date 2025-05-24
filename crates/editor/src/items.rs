@@ -1498,6 +1498,7 @@ impl SearchableItem for Editor {
                 replacement: false,
                 selection: false,
                 find_in_results: true,
+                todo_fixme: true,
             }
         } else {
             SearchOptions {
@@ -1507,6 +1508,7 @@ impl SearchableItem for Editor {
                 replacement: true,
                 selection: true,
                 find_in_results: false,
+                todo_fixme: true,
             }
         }
     }

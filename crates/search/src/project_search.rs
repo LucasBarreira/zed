@@ -1,7 +1,7 @@
 use crate::{
     BufferSearchBar, FocusSearch, NextHistoryQuery, PreviousHistoryQuery, ReplaceAll, ReplaceNext,
     SearchOptions, SelectNextMatch, SelectPreviousMatch, ToggleCaseSensitive, ToggleIncludeIgnored,
-    ToggleRegex, ToggleReplace, ToggleWholeWord, buffer_search::Deploy,
+    ToggleRegex, ToggleReplace, ToggleWholeWord, ToggleTodoFixme, buffer_search::Deploy,
 };
 use anyhow::Context as _;
 use collections::{HashMap, HashSet};
@@ -101,6 +101,12 @@ pub fn init(cx: &mut App) {
             workspace,
             move |search_bar, action: &SelectNextMatch, window, cx| {
                 search_bar.select_next_match(action, window, cx)
+            },
+        );
+        register_workspace_action(
+            workspace,
+            move |search_bar, action: &ToggleTodoFixme, window, cx| {
+                search_bar.toggle_search_option(SearchOptions::TODO_FIXME, window, cx);
             },
         );
 
@@ -1102,7 +1108,11 @@ impl ProjectSearchView {
 
     fn build_search_query(&mut self, cx: &mut Context<Self>) -> Option<SearchQuery> {
         // Do not bail early in this function, as we want to fill out `self.panels_with_errors`.
-        let text = self.query_editor.read(cx).text(cx);
+        let text = if self.search_options.contains(SearchOptions::TODO_FIXME) {
+            r"\b(TODO|FIXME)\b.*".to_string()
+        } else {
+            self.query_editor.read(cx).text(cx)
+        };
         let open_buffers = if self.included_opened_only {
             Some(self.open_buffers(cx))
         } else {
@@ -1167,7 +1177,8 @@ impl ProjectSearchView {
             .count()
             > 1;
 
-        let query = if self.search_options.contains(SearchOptions::REGEX) {
+            let query = if self.search_options.contains(SearchOptions::REGEX)
+            || self.search_options.contains(SearchOptions::TODO_FIXME){
             match SearchQuery::regex(
                 text,
                 self.search_options.contains(SearchOptions::WHOLE_WORD),
@@ -1466,6 +1477,21 @@ impl ProjectSearchView {
                     ))
                     .on_click(|_event, window, cx| {
                         window.dispatch_action(ToggleWholeWord.boxed_clone(), cx)
+                    }),
+            )
+            .child(
+                Button::new("todo-fixme", "Search TODO/FIXME")
+                    .icon(IconName::WholeWord)
+                    .icon_position(IconPosition::Start)
+                    .icon_size(IconSize::Small)
+                    .key_binding(KeyBinding::for_action_in(
+                        &ToggleTodoFixme,
+                        &focus_handle,
+                        window,
+                        cx,
+                    ))
+                    .on_click(|_event, window, cx| {
+                        window.dispatch_action(ToggleTodoFixme.boxed_clone(), cx)
                     }),
             )
     }
@@ -1970,6 +1996,13 @@ impl Render for ProjectSearchBar {
                         focus_handle.clone(),
                         cx.listener(|this, _, window, cx| {
                             this.toggle_search_option(SearchOptions::REGEX, window, cx);
+                        }),
+                    ))
+                    .child(SearchOptions::TODO_FIXME.as_button(
+                        self.is_option_enabled(SearchOptions::TODO_FIXME, cx),
+                        focus_handle.clone(),
+                        cx.listener(|this, _, window, cx| {
+                            this.toggle_search_option(SearchOptions::TODO_FIXME, window, cx);
                         }),
                     )),
             );

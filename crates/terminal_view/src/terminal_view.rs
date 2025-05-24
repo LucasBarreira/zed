@@ -1764,6 +1764,7 @@ impl SearchableItem for TerminalView {
             replacement: false,
             selection: false,
             find_in_results: false,
+            todo_fixme: false,
         }
     }
 

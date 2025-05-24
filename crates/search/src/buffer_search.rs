@@ -3,7 +3,7 @@ mod registrar;
 use crate::{
     FocusSearch, NextHistoryQuery, PreviousHistoryQuery, ReplaceAll, ReplaceNext, SearchOptions,
     SelectAllMatches, SelectNextMatch, SelectPreviousMatch, ToggleCaseSensitive, ToggleRegex,
-    ToggleReplace, ToggleSelection, ToggleWholeWord, search_bar::render_nav_button,
+    ToggleReplace, ToggleSelection, ToggleWholeWord, ToggleTodoFixme, search_bar::render_nav_button,
 };
 use any_vec::AnyVec;
 use anyhow::Context as _;
@@ -284,6 +284,15 @@ impl Render for BufferSearchBar {
                                             this.toggle_regex(&ToggleRegex, window, cx)
                                         }),
                                     )
+                                }))
+                                .children(supported_options.todo_fixme.then(|| {
+                                    self.render_search_option_button(
+                                        SearchOptions::TODO_FIXME,
+                                        focus_handle.clone(),
+                                        cx.listener(|this, _, window, cx| {
+                                            this.toggle_todo_fixme(&ToggleTodoFixme, window, cx)
+                                        }),
+                                    )
                                 })),
                         )
                     }),
@@ -507,6 +516,9 @@ impl Render for BufferSearchBar {
             .when(self.supported_options(cx).selection, |this| {
                 this.on_action(cx.listener(Self::toggle_selection))
             })
+            .when(self.supported_options(cx).todo_fixme, |this| {
+                this.on_action(cx.listener(Self::toggle_todo_fixme))
+            })
             .child(h_flex().relative().child(search_line.w_full()).when(
                 !narrow_mode && !supported_options.find_in_results,
                 |div| {
@@ -614,6 +626,13 @@ impl BufferSearchBar {
         registrar.register_handler(ForDeployed(|this, action: &ToggleReplace, window, cx| {
             if this.supported_options(cx).replacement {
                 this.toggle_replace(action, window, cx);
+            } else {
+                cx.propagate();
+            }
+        }));
+        registrar.register_handler(ForDeployed(|this, action: &ToggleTodoFixme, window, cx| {
+            if this.supported_options(cx).todo_fixme {
+                this.toggle_todo_fixme(action, window, cx);
             } else {
                 cx.propagate();
             }
@@ -1189,6 +1208,10 @@ impl BufferSearchBar {
         self.toggle_search_option(SearchOptions::REGEX, window, cx)
     }
 
+    fn toggle_todo_fixme(&mut self, _: &ToggleTodoFixme, window: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_search_option(SearchOptions::TODO_FIXME, window, cx)
+    }
+
     fn clear_active_searchable_item_matches(&mut self, window: &mut Window, cx: &mut App) {
         if let Some(active_searchable_item) = self.active_searchable_item.as_ref() {
             self.active_match_index = None;
@@ -1227,7 +1250,12 @@ impl BufferSearchBar {
         cx: &mut Context<Self>,
     ) -> oneshot::Receiver<()> {
         let (done_tx, done_rx) = oneshot::channel();
-        let query = self.query(cx);
+        let query = if self.search_options.contains(SearchOptions::TODO_FIXME) {
+            r"\b(TODO|FIXME)\b.*".to_string()
+        } else {
+            self.query(cx)
+        };
+
         self.pending_search.take();
 
         if let Some(active_searchable_item) = self.active_searchable_item.as_ref() {
@@ -2178,10 +2206,12 @@ mod tests {
                     "edit\\(",
                     Some(SearchOptions::WHOLE_WORD | SearchOptions::REGEX),
                     window,
-                    cx,
+cx,
                 )
+
             })
             .await
+
             .unwrap();
 
         search_bar.update_in(cx, |search_bar, window, cx| {
@@ -2203,7 +2233,10 @@ mod tests {
                     "edit(",
                     Some(SearchOptions::WHOLE_WORD | SearchOptions::CASE_SENSITIVE),
                     window,
-                    cx,
+cx,
+
+
+
                 )
             })
             .await
@@ -2400,11 +2433,11 @@ mod tests {
         assert_eq!(
             editor.update(cx, |this, cx| { this.text(cx) }),
             r#"
-        A regular expr$1 (shortened as regex or regexp;[1] also referred to as
-        rational expr$1[2][3]) is a sequence of characters that specifies a search
-        pattern in text. Usually such patterns are used by string-searching algorithms
-        for "find" or "find and replace" operations on strings, or for input validation.
-        "#
+            A regular expr$1 (shortened as regex or regexp;[1] also referred to as
+            rational expr$1[2][3]) is a sequence of characters that specifies a search
+            pattern in text. Usually such patterns are used by string-searching algorithms
+            for "find" or "find and replace" operations on strings, or for input validation.
+            "#
             .unindent()
         );
 
@@ -2426,11 +2459,11 @@ mod tests {
         assert_eq!(
             editor.update(cx, |this, cx| { this.text(cx) }),
             r#"
-        A regular expr$1 (shortened as regex banana regexp;[1] also referred to as
-        rational expr$1[2][3]) is a sequence of characters that specifies a search
-        pattern in text. Usually such patterns are used by string-searching algorithms
-        for "find" or "find and replace" operations on strings, or for input validation.
-        "#
+            A regular expr$1 (shortened as regex banana regexp;[1] also referred to as
+            rational expr$1[2][3]) is a sequence of characters that specifies a search
+            pattern in text. Usually such patterns are used by string-searching algorithms
+            for "find" or "find and replace" operations on strings, or for input validation.
+            "#
             .unindent()
         );
         // Let's turn on regex mode.
@@ -2449,11 +2482,11 @@ mod tests {
         assert_eq!(
             editor.update(cx, |this, cx| { this.text(cx) }),
             r#"
-        A regular expr$1 (shortened as regex banana regexp;1number also referred to as
-        rational expr$12number3number) is a sequence of characters that specifies a search
-        pattern in text. Usually such patterns are used by string-searching algorithms
-        for "find" or "find and replace" operations on strings, or for input validation.
-        "#
+            A regular expr$1 (shortened as regex banana regexp;1number also referred to as
+            rational expr$12number3number) is a sequence of characters that specifies a search
+            pattern in text. Usually such patterns are used by string-searching algorithms
+            for "find" or "find and replace" operations on strings, or for input validation.
+            "#
             .unindent()
         );
         // Now with a whole-word twist.
@@ -2479,11 +2512,11 @@ mod tests {
         assert_eq!(
             editor.update(cx, |this, cx| { this.text(cx) }),
             r#"
-        A regular expr$1 (shortened as regex banana regexp;1number also referred to as
-        rational expr$12number3number) is a sequence of characters that specifies a search
-        pattern in text. Usually such patterns are used by string-searching things
-        for "find" or "find and replace" operations on strings, or for input validation.
-        "#
+            A regular expr$1 (shortened as regex banana regexp;1number also referred to as
+            rational expr$12number3number) is a sequence of characters that specifies a search
+            pattern in text. Usually such patterns are used by string-searching things
+            for "find" or "find and replace" operations on strings, or for input validation.
+            "#
             .unindent()
         );
     }
