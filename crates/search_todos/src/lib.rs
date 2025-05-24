@@ -5,8 +5,8 @@ use workspace::{Workspace, Panel};
 actions!(search_todos, [OpenTodosPanel]);
 
 pub struct TodoPanel {
-    todos: Vec<TodoEntry>,
     focus_handle: FocusHandle,
+    todos: Vec<TodoEntry>,
 }
 
 impl TodoPanel {
