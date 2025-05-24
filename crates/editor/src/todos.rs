@@ -1,17 +1,41 @@
 use crate::Editor;
 use anyhow::Result;
 use gpui::{
-    actions, div, h_flex, list, px, v_flex, AppContext, DismissEvent, div, prelude::*, 
-    ListState, ListView, WindowContext,
+    actions, div, h_flex, list, px, v_flex, AppContext, Command, DismissEvent, div, prelude::*, 
+    ListState, ListView, WindowContext, SharedString, Button,
 };
 use project::{Project, TodoEntry, TodoKind}; 
 use ui::{prelude::*, ListHeader, ListItem};
-use workspace::{Panel, Workspace, panel};
+use workspace::{Panel, Workspace, panel, toolbar::ToolbarItemLocation};
 use regex::Regex;
+use log::{debug, info};
 
-actions!(todos, [ShowTodos, ToggleFocus]);
+actions!(todos, [ShowTodos, ToggleFocus, ToggleTodosPanel]);
+
+pub struct ToggleTodosPanel;
+
+impl Command for ToggleTodosPanel {}
 
 impl Editor {
+    pub fn init(cx: &mut AppContext) {
+        debug!("Registering ToggleTodosPanel command and toolbar item");
+        cx.register_action(ToggleTodosPanel::default());
+        cx.bind_command(ToggleTodosPanel, Self::handle_toggle_todos);
+
+        // Register toolbar button
+        workspace::register_toolbar_item(
+            ToolbarItemLocation::End,
+            |_workspace, cx| {
+                Button::new(
+                    cx,
+                    "Show TODOs",
+                    IconName::Check,
+                    ToggleTodosPanel::default(),
+                )
+            },
+        );
+    }
+
     pub fn show_todos(&mut self, _: &ShowTodos, cx: &mut WindowContext<'_, Editor>) {
         if let Some(project) = &self.project {
             let weak_editor = cx.entity_id().into();
@@ -39,6 +63,21 @@ impl Editor {
                 Ok(())
             })
             .detach_and_log_err(cx);
+        }
+    }
+
+    pub fn handle_toggle_todos(&mut self, _: &ToggleTodosPanel, cx: &mut WindowContext) {
+        debug!("ToggleTodosPanel command triggered");
+        if let Some(workspace) = self.workspace() {
+            workspace.update(cx, |workspace, cx| {
+                if workspace.has_panel::<TodosPanel>(cx) {
+                    debug!("Toggling existing TodosPanel");
+                    workspace.toggle_panel_focus::<TodosPanel>(cx);
+                } else {
+                    debug!("Creating new TodosPanel");
+                    self.show_todos(&ShowTodos, cx);
+                }
+            });
         }
     }
 }

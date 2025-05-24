@@ -1,0 +1,9 @@
+[package]
+name = "search_todos"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpui = { path = "../gpui" }
+workspace = { path = "../workspace" }
+project = { path = "../project" }
