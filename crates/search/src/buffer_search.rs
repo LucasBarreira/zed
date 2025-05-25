@@ -29,7 +29,6 @@ use settings::Settings;
 use std::sync::Arc;
 use theme::ThemeSettings;
 use zed_actions::outline::ToggleOutline;
-
 use ui::{
     BASE_REM_SIZE_IN_PX, IconButton, IconButtonShape, IconName, Tooltip, h_flex, prelude::*,
     utils::SearchInputWidth,
@@ -194,7 +193,7 @@ impl Render for BufferSearchBar {
             .active_searchable_item
             .as_ref()
             .and_then(|searchable_item| {
-                if self.query(cx).is_empty() {
+                if self.query(cx).is_empty() && !self.search_options.contains(SearchOptions::TODO_FIXME) {
                     return None;
                 }
                 let matches_count = self
@@ -947,7 +946,7 @@ impl BufferSearchBar {
         cx: &mut Context<Self>,
     ) -> oneshot::Receiver<()> {
         let options = options.unwrap_or(self.default_options);
-        let updated = query != self.query(cx) || self.search_options != options;
+        let updated = query != self.query(cx) || self.search_options != options || options.contains(SearchOptions::TODO_FIXME);
         if updated {
             self.query_editor.update(cx, |query_editor, cx| {
                 query_editor.buffer().update(cx, |query_buffer, cx| {
@@ -1209,7 +1208,7 @@ impl BufferSearchBar {
     }
 
     fn toggle_todo_fixme(&mut self, _: &ToggleTodoFixme, window: &mut Window, cx: &mut Context<Self>) {
-        self.toggle_search_option(SearchOptions::TODO_FIXME, window, cx)
+        self.toggle_search_option(SearchOptions::TODO_FIXME, window, cx);
     }
 
     fn clear_active_searchable_item_matches(&mut self, window: &mut Window, cx: &mut App) {
@@ -1270,7 +1269,8 @@ impl BufferSearchBar {
                 {
                     search
                 } else {
-                    if self.search_options.contains(SearchOptions::REGEX) {
+                    if self.search_options.contains(SearchOptions::REGEX) || 
+                    self.search_options.contains(SearchOptions::TODO_FIXME) {
                         match SearchQuery::regex(
                             query,
                             self.search_options.contains(SearchOptions::WHOLE_WORD),
@@ -1316,9 +1316,7 @@ impl BufferSearchBar {
 
                 self.active_search = Some(query.clone());
                 let query_text = query.as_str().to_string();
-
                 let matches = active_searchable_item.find_matches(query, window, cx);
-
                 let active_searchable_item = active_searchable_item.downgrade();
                 self.pending_search = Some(cx.spawn_in(window, async move |this, cx| {
                     let matches = matches.await;
@@ -1326,10 +1324,9 @@ impl BufferSearchBar {
                     this.update_in(cx, |this, window, cx| {
                         if let Some(active_searchable_item) =
                             WeakSearchableItemHandle::upgrade(active_searchable_item.as_ref(), cx)
-                        {
+                        {   
                             this.searchable_items_with_matches
                                 .insert(active_searchable_item.downgrade(), matches);
-
                             this.update_match_index(window, cx);
                             this.search_history
                                 .add(&mut this.search_history_cursor, query_text);
@@ -1374,7 +1371,7 @@ impl BufferSearchBar {
                     .get(&searchable_item.downgrade())?;
                 searchable_item.active_match_index(direction, matches, window, cx)
             });
-        if new_index != self.active_match_index {
+        if new_index != self.active_match_index{
             self.active_match_index = new_index;
             cx.notify();
         }
@@ -1543,7 +1540,7 @@ impl BufferSearchBar {
     }
 
     fn adjust_query_regex_language(&self, cx: &mut App) {
-        let enable = self.search_options.contains(SearchOptions::REGEX);
+        let enable = self.search_options.contains(SearchOptions::REGEX) || self.search_options.contains(SearchOptions::TODO_FIXME);
         let query_buffer = self
             .query_editor
             .read(cx)
@@ -2433,11 +2430,11 @@ cx,
         assert_eq!(
             editor.update(cx, |this, cx| { this.text(cx) }),
             r#"
-            A regular expr$1 (shortened as regex or regexp;[1] also referred to as
-            rational expr$1[2][3]) is a sequence of characters that specifies a search
-            pattern in text. Usually such patterns are used by string-searching algorithms
-            for "find" or "find and replace" operations on strings, or for input validation.
-            "#
+        A regular expr$1 (shortened as regex or regexp;[1] also referred to as
+        rational expr$1[2][3]) is a sequence of characters that specifies a search
+        pattern in text. Usually such patterns are used by string-searching algorithms
+        for "find" or "find and replace" operations on strings, or for input validation.
+        "#
             .unindent()
         );
 
@@ -2459,11 +2456,11 @@ cx,
         assert_eq!(
             editor.update(cx, |this, cx| { this.text(cx) }),
             r#"
-            A regular expr$1 (shortened as regex banana regexp;[1] also referred to as
-            rational expr$1[2][3]) is a sequence of characters that specifies a search
-            pattern in text. Usually such patterns are used by string-searching algorithms
-            for "find" or "find and replace" operations on strings, or for input validation.
-            "#
+        A regular expr$1 (shortened as regex banana regexp;[1] also referred to as
+        rational expr$1[2][3]) is a sequence of characters that specifies a search
+        pattern in text. Usually such patterns are used by string-searching algorithms
+        for "find" or "find and replace" operations on strings, or for input validation.
+        "#
             .unindent()
         );
         // Let's turn on regex mode.
@@ -2482,11 +2479,11 @@ cx,
         assert_eq!(
             editor.update(cx, |this, cx| { this.text(cx) }),
             r#"
-            A regular expr$1 (shortened as regex banana regexp;1number also referred to as
-            rational expr$12number3number) is a sequence of characters that specifies a search
-            pattern in text. Usually such patterns are used by string-searching algorithms
-            for "find" or "find and replace" operations on strings, or for input validation.
-            "#
+        A regular expr$1 (shortened as regex banana regexp;1number also referred to as
+        rational expr$12number3number) is a sequence of characters that specifies a search
+        pattern in text. Usually such patterns are used by string-searching algorithms
+        for "find" or "find and replace" operations on strings, or for input validation.
+        "#
             .unindent()
         );
         // Now with a whole-word twist.
@@ -2512,11 +2509,11 @@ cx,
         assert_eq!(
             editor.update(cx, |this, cx| { this.text(cx) }),
             r#"
-            A regular expr$1 (shortened as regex banana regexp;1number also referred to as
-            rational expr$12number3number) is a sequence of characters that specifies a search
-            pattern in text. Usually such patterns are used by string-searching things
-            for "find" or "find and replace" operations on strings, or for input validation.
-            "#
+        A regular expr$1 (shortened as regex banana regexp;1number also referred to as
+        rational expr$12number3number) is a sequence of characters that specifies a search
+        pattern in text. Usually such patterns are used by string-searching things
+        for "find" or "find and replace" operations on strings, or for input validation.
+        "#
             .unindent()
         );
     }
@@ -2932,4 +2929,71 @@ cx,
             });
         });
     }
+    
+    #[gpui::test]
+    async fn test_search_todo_fixme(cx: &mut TestAppContext) {
+        init_globals(cx);
+        let buffer_text = r#"
+        // TODO: Refactor this function
+        let x = 42;
+        // FIXME: This is a bug
+        // NOTE: This is not a todo
+        // TODO another todo without colon
+        "#.unindent();
+        let buffer = cx.new(|cx| Buffer::local(buffer_text, cx));
+        let cx = cx.add_empty_window();
+
+        let editor =
+            cx.new_window_entity(|window, cx| Editor::for_buffer(buffer.clone(), None, window, cx));
+
+        let search_bar = cx.new_window_entity(|window, cx| {
+            let mut search_bar = BufferSearchBar::new(None, window, cx);
+            search_bar.set_active_pane_item(Some(&editor), window, cx);
+            search_bar.show(window, cx);
+            search_bar
+        });
+
+        // Enable TODO_FIXME search option and search
+        search_bar.update_in(cx, |search_bar, window, cx| {
+            search_bar.enable_search_option(SearchOptions::TODO_FIXME, window, cx);
+        });
+
+        // Wait for search to complete and check highlights
+        search_bar
+            .update_in(cx, |search_bar, window, cx| {
+                search_bar.search("", Some(SearchOptions::TODO_FIXME), window, cx)
+            })
+            .await
+            .unwrap();
+
+        editor.update_in(cx, |editor, window, cx| {
+            let highlights = editor.all_text_background_highlights(window, cx);
+            let display_points_of = |background_highlights: Vec<(std::ops::Range<DisplayPoint>, Hsla)>| {
+                background_highlights
+                    .into_iter()
+                    .map(|(range, _)| range)
+                    .collect::<Vec<_>>()
+            };
+            // There should be 3 matches for TODO/FIXME
+            assert_eq!(
+                display_points_of(highlights).len(),
+                3,
+                "Should highlight all TODO and FIXME comments"
+            );
+        });
+
+        // Select all matches and check selections
+        search_bar.update_in(cx, |search_bar, window, cx| {
+            search_bar.select_all_matches(&SelectAllMatches, window, cx);
+        });
+        search_bar.update(cx, |_, cx| {
+            let all_selections =
+                editor.update(cx, |editor, cx| editor.selections.display_ranges(cx));
+            assert_eq!(
+                all_selections.len(),
+                3,
+                "Should select all TODO/FIXME matches"
+            );
+        });
+    }  
 }

@@ -93,6 +93,12 @@ pub fn init(cx: &mut App) {
         );
         register_workspace_action(
             workspace,
+            move |search_bar, _: &ToggleTodoFixme, window, cx| {
+                search_bar.toggle_search_option(SearchOptions::TODO_FIXME, window, cx);
+            },
+        );
+        register_workspace_action(
+            workspace,
             move |search_bar, action: &SelectPreviousMatch, window, cx| {
                 search_bar.select_prev_match(action, window, cx)
             },
@@ -101,12 +107,6 @@ pub fn init(cx: &mut App) {
             workspace,
             move |search_bar, action: &SelectNextMatch, window, cx| {
                 search_bar.select_next_match(action, window, cx)
-            },
-        );
-        register_workspace_action(
-            workspace,
-            move |search_bar, action: &ToggleTodoFixme, window, cx| {
-                search_bar.toggle_search_option(SearchOptions::TODO_FIXME, window, cx);
             },
         );
 
@@ -660,6 +660,7 @@ impl ProjectSearchView {
     }
 
     fn toggle_search_option(&mut self, option: SearchOptions, cx: &mut Context<Self>) {
+        let was_enabled = self.search_options.contains(option);
         self.search_options.toggle(option);
         ActiveSettings::update_global(cx, |settings, cx| {
             settings.0.insert(
@@ -668,6 +669,19 @@ impl ProjectSearchView {
             );
         });
         self.adjust_query_regex_language(cx);
+        // Immediately trigger a search when TODO_FIXME is enabled
+        if option == SearchOptions::TODO_FIXME {
+            if self.search_options.contains(SearchOptions::TODO_FIXME) {
+                self.search(cx);
+            } else if was_enabled {
+                // Clear the search when TODO_FIXME is disabled
+                self.entity.update(cx, |model, cx| {
+                    model.match_ranges.clear();
+                    model.last_search_query_text = None;
+                    cx.notify();
+                });
+            }
+        }
     }
 
     fn toggle_opened_only(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -1481,7 +1495,7 @@ impl ProjectSearchView {
             )
             .child(
                 Button::new("todo-fixme", "Search TODO/FIXME")
-                    .icon(IconName::WholeWord)
+                    .icon(IconName::Warning)
                     .icon_position(IconPosition::Start)
                     .icon_size(IconSize::Small)
                     .key_binding(KeyBinding::for_action_in(
@@ -4234,6 +4248,102 @@ pub mod tests {
                 "Project search should take the query from the buffer search bar since it got focused and had a query inside"
             );
         });
+    }
+
+    #[gpui::test]
+    async fn test_search_todo_fixme(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        // Setup a test project with a file containing TODO and FIXME comments
+        let file_content = r#"
+        // TODO: Refactor this function
+        let x = 42;
+        // FIXME: This is a bug
+        // NOTE: This is not a todo
+        // TODO another todo without colon
+        "#;
+
+        // Create fake filesystem and project
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(
+            path!("/dir"),
+            json!({
+                "main.rs": file_content,
+            }),
+        )
+        .await;
+        let project = Project::test(fs.clone(), [path!("/dir").as_ref()], cx).await;
+        let window = cx.add_window(|window, cx| workspace::Workspace::test_new(project.clone(), window, cx));
+        let workspace = window.root(cx).unwrap();
+
+        // Create a ProjectSearchBar and ProjectSearchView
+        let search_bar = window.build_entity(cx, |_, _| ProjectSearchBar::new());
+        window.update(cx, |workspace, window, cx| {
+            workspace.panes()[0].update(cx, |pane, cx| {
+                pane.toolbar().update(cx, |toolbar, cx| toolbar.add_item(search_bar.clone(), window, cx))
+            });
+            ProjectSearchView::new_search(workspace, &workspace::NewSearch, window, cx)
+        }).unwrap();
+
+        let search_view = cx.read(|cx| {
+            workspace
+                .read(cx)
+                .active_pane()
+                .read(cx)
+                .active_item()
+                .and_then(|item| item.downcast::<ProjectSearchView>())
+                .expect("Search view expected to appear after new search event trigger")
+        });
+
+        // Enable TODO_FIXME search option and search
+        window.update(cx, |_, window, cx| {
+            search_bar.update(cx, |search_bar, cx| {
+                search_bar.focus_search(window, cx);
+                search_bar.toggle_search_option(SearchOptions::TODO_FIXME, window, cx);
+            });
+        }).unwrap();
+
+        cx.background_executor.run_until_parked();
+
+        // Check that the search results contain all TODO and FIXME comments
+        window.update(cx, |_, _, cx| {
+            search_view.update(cx, |search_view, cx| {
+                let matches = search_view.get_matches(cx);
+                assert_eq!(
+                    matches.len(),
+                    3,
+                    "Should find all TODO and FIXME comments in project search"
+                );
+            });
+        }).unwrap();
+
+        // Check that the match count in the search bar is correct
+        window.update(cx, |_, _, cx| {
+            search_view.update(cx, |search_view, _| {
+                assert_eq!(
+                    search_view.active_match_index,
+                    Some(0),
+                    "First TODO/FIXME match should be active"
+                );
+            });
+        }).unwrap();
+
+        // Select next match and check index
+        window.update(cx, |_, window, cx| {
+            search_bar.update(cx, |search_bar, cx| {
+                search_bar.select_next_match(&SelectNextMatch, window, cx);
+            });
+        }).unwrap();
+        window.update(cx, |_, _, cx| {
+            search_view.update(cx, |search_view, _| {
+                assert_eq!(
+                    search_view.active_match_index,
+                    Some(1),
+                    "Second TODO/FIXME match should be active"
+                );
+            });
+        }).unwrap();
+
     }
 
     fn init_test(cx: &mut TestAppContext) {
