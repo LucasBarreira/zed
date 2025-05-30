@@ -387,16 +387,44 @@ impl EventEmitter<ViewEvent> for ProjectSearchView {}
 impl Render for ProjectSearchView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.has_matches() {
+            let should_show_todo_fixme_popup = self.search_options.contains(SearchOptions::TODO_FIXME);
+            let todo_fixme_popup = should_show_todo_fixme_popup.then(|| {
+                h_flex()
+                .absolute()
+                .bottom_8()
+                .right_4()
+                //.right(px(248.))
+                //.gap_2()
+                .bg(cx.theme().colors().surface_background) 
+                .border_1()
+                .border_color(cx.theme().colors().border) 
+                .rounded_sm()
+                .shadow_sm()
+                .px_2()
+                .py_2()
+                .items_center()
+                .child(
+                    Icon::new(IconName::Warning)
+                        .size(IconSize::Small)
+                        .color(Color::Muted)
+                )
+                .child(
+                    Label::new("Searching for TODO/FIXME")
+                        .color(Color::Muted)
+                        .size(LabelSize::Small),
+                )
+            });
+
             div()
                 .flex_1()
                 .size_full()
                 .track_focus(&self.focus_handle(cx))
                 .child(self.results_editor.clone())
+                .children(todo_fixme_popup)
         } else {
             let model = self.entity.read(cx);
             let has_no_results = model.no_results.unwrap_or(false);
             let is_search_underway = model.pending_search.is_some();
-
             let heading_text = if is_search_underway {
                 "Searching…"
             } else if has_no_results {
@@ -4253,7 +4281,6 @@ pub mod tests {
     #[gpui::test]
     async fn test_search_todo_fixme(cx: &mut TestAppContext) {
         init_test(cx);
-
         // Setup a test project with a file containing TODO and FIXME comments
         let file_content = r#"
         // TODO: Refactor this function

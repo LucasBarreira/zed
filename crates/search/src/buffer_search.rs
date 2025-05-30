@@ -157,6 +157,12 @@ impl BufferSearchBar {
     pub fn query_editor_focused(&self) -> bool {
         self.query_editor_focused
     }
+
+    fn should_show_todo_fixme_popup(&self) -> bool {
+       self.search_options.contains(SearchOptions::TODO_FIXME)
+            && self.query_editor_focused
+            && !self.dismissed
+    }
 }
 
 impl EventEmitter<Event> for BufferSearchBar {}
@@ -211,7 +217,8 @@ impl Render for BufferSearchBar {
             .unwrap_or_else(|| "0/0".to_string());
         let should_show_replace_input = self.replace_enabled && supported_options.replacement;
         let in_replace = self.replacement_editor.focus_handle(cx).is_focused(window);
-
+        
+        let should_show_todo_fixme_popup = self.should_show_todo_fixme_popup();
         let mut key_context = KeyContext::new_with_defaults();
         key_context.add("BufferSearchBar");
         if in_replace {
@@ -478,6 +485,32 @@ impl Render for BufferSearchBar {
                 )
         });
 
+        let todo_fixme_popup = should_show_todo_fixme_popup.then(|| {
+            h_flex()
+            .absolute()
+            .bottom_8()
+            .right(px(248.))
+            .gap_2()
+            .bg(cx.theme().colors().surface_background) 
+            .border_1()
+            .border_color(cx.theme().colors().border) 
+            .rounded_sm()
+            .shadow_sm()
+            .px_2()
+            .py_2()
+            .items_center()
+            .child(
+                Icon::new(IconName::Warning)
+                    .size(IconSize::Small)
+                    .color(Color::Muted)
+            )
+            .child(
+                Label::new("Searching for TODO/FIXME")
+                    .color(Color::Muted)
+                    .size(LabelSize::Small),
+            )
+        });
+
         v_flex()
             .id("buffer_search")
             .gap_2()
@@ -537,6 +570,7 @@ impl Render for BufferSearchBar {
                 },
             ))
             .children(replace_line)
+            .children(todo_fixme_popup)
     }
 }
 
@@ -1254,7 +1288,6 @@ impl BufferSearchBar {
         } else {
             self.query(cx)
         };
-
         self.pending_search.take();
 
         if let Some(active_searchable_item) = self.active_searchable_item.as_ref() {
